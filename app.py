@@ -2,9 +2,11 @@ import streamlit as st
 import hashlib
 import json
 import os
+import csv
 from datetime import datetime
 
-BLOCKCHAIN_FILE = "blockchain.json"
+JSON_FILE = "blockchain.json"
+CSV_FILE = "blockchain.csv"
 
 # --- Blockchain Logic ---
 
@@ -43,6 +45,7 @@ class Blockchain:
         genesis_block = Block(0, str(datetime.now()), {"message": "Genesis Block"}, "0")
         self.chain.append(genesis_block)
         self.save_chain()
+        self.save_block_to_csv(genesis_block)
 
     def add_block(self, data):
         previous_block = self.chain[-1]
@@ -54,14 +57,15 @@ class Blockchain:
         )
         self.chain.append(new_block)
         self.save_chain()
+        self.save_block_to_csv(new_block)
 
     def save_chain(self):
-        with open(BLOCKCHAIN_FILE, "w") as file:
+        with open(JSON_FILE, "w") as file:
             json.dump([block.to_dict() for block in self.chain], file, indent=4)
 
     def load_chain(self):
-        if os.path.exists(BLOCKCHAIN_FILE):
-            with open(BLOCKCHAIN_FILE, "r") as file:
+        if os.path.exists(JSON_FILE):
+            with open(JSON_FILE, "r") as file:
                 chain_data = json.load(file)
                 self.chain = []
                 for block_data in chain_data:
@@ -75,6 +79,22 @@ class Blockchain:
         else:
             self.create_genesis_block()
 
+    def save_block_to_csv(self, block):
+        file_exists = os.path.isfile(CSV_FILE)
+        with open(CSV_FILE, mode='a', newline='') as file:
+            writer = csv.writer(file)
+            if not file_exists:
+                writer.writerow(["Index", "Timestamp", "Buyer", "Event", "Seat", "Previous Hash", "Hash"])
+            data = block.data
+            writer.writerow([
+                block.index,
+                block.timestamp,
+                data.get("buyer", ""),
+                data.get("event", ""),
+                data.get("seat", ""),
+                block.previous_hash,
+                block.hash
+            ])
 
 # --- Streamlit UI ---
 
@@ -98,7 +118,7 @@ if submit:
             "seat": seat_number
         }
         blockchain.add_block(ticket_data)
-        st.success("✅ Ticket added to blockchain.")
+        st.success("✅ Ticket added to blockchain and stored in JSON & CSV.")
     else:
         st.error("❌ Please fill in all fields.")
 
