@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EventChain | Blockchain Ticketing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex justify-between items-center border-b border-slate-800 pb-4 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-emerald-400">🎟️ EventChain Ledger</h1>
+        <p class="text-sm text-slate-400">Proof-of-Work • ECDSA Signed Tickets • SQLite Persistence</p>
+      </div>
+      <div id="chainStatus" class="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-950 text-emerald-400 border border-emerald-700">
+        Checking Ledger...
+      </div>
+    </header>
+
+    <!-- Analytics KPI Row -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+        <p class="text-xs text-slate-400 uppercase">Minted Tickets</p>
+        <p id="kpiTickets" class="text-2xl font-bold mt-1">0</p>
+      </div>
+      <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+        <p class="text-xs text-slate-400 uppercase">Total Revenue (₹)</p>
+        <p id="kpiRevenue" class="text-2xl font-bold text-emerald-400 mt-1">₹0</p>
+      </div>
+      <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+        <p class="text-xs text-slate-400 uppercase">Active Events</p>
+        <p id="kpiEvents" class="text-2xl font-bold mt-1">0</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Mint Ticket Form -->
+      <div class="space-y-6">
+        <div class="bg-slate-900 p-5 rounded-xl border border-slate-800">
+          <h2 class="text-lg font-semibold mb-4">Mint New Ticket</h2>
+          <form id="mintForm" class="space-y-3">
+            <input id="buyer" required placeholder="Buyer Name" class="w-full p-2.5 rounded bg-slate-800 border border-slate-700 text-sm" />
+            <input id="event" required placeholder="Event Name (e.g., Sunburn Pune)" class="w-full p-2.5 rounded bg-slate-800 border border-slate-700 text-sm" />
+            <div class="grid grid-cols-2 gap-2">
+              <input id="seat" required placeholder="Seat (e.g., A-12)" class="w-full p-2.5 rounded bg-slate-800 border border-slate-700 text-sm" />
+              <input id="price" type="number" step="0.01" required placeholder="Price (₹)" class="w-full p-2.5 rounded bg-slate-800 border border-slate-700 text-sm" />
+            </div>
+            <button type="submit" class="w-full py-2.5 rounded bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold text-sm transition">
+              Mine & Issue Ticket
+            </button>
+          </form>
+          <p id="formMsg" class="text-xs mt-3 text-rose-400"></p>
+        </div>
+
+        <!-- Tamper Simulator -->
+        <div class="bg-slate-900 p-5 rounded-xl border border-rose-900/50">
+          <h2 class="text-sm font-semibold text-rose-400 uppercase mb-2">⚠️ Security Tamper Simulator</h2>
+          <p class="text-xs text-slate-400 mb-3">Modify a past block directly in SQLite to test SHA-256 integrity detection.</p>
+          <div class="flex gap-2">
+            <input id="tamperIdx" type="number" min="1" placeholder="Block #" class="w-24 p-2 rounded bg-slate-800 border border-slate-700 text-sm" />
+            <input id="tamperBuyer" placeholder="Fake Buyer" class="flex-1 p-2 rounded bg-slate-800 border border-slate-700 text-sm" />
+            <button onclick="simulateTamper()" class="px-3 py-2 rounded bg-rose-600 hover:bg-rose-700 text-xs font-semibold">Alter</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ledger Explorer -->
+      <div class="lg:col-span-2 bg-slate-900 p-5 rounded-xl border border-slate-800">
+        <h2 class="text-lg font-semibold mb-4">Immutable Block Explorer</h2>
+        <div id="ledger" class="space-y-4 max-h-[600px] overflow-y-auto pr-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadDashboard() {
+      const [chainRes, statsRes] = await Promise.all([fetch('/api/chain'), fetch('/api/analytics')]);
+      const { chain, validation } = await chainRes.json();
+      const stats = await statsRes.json();
+
+      document.getElementById('kpiTickets').textContent = stats.total_tickets;
+      document.getElementById('kpiRevenue').textContent = `₹${stats.total_revenue}`;
+      document.getElementById('kpiEvents').textContent = Object.keys(stats.event_breakdown).length;
+
+      const statusEl = document.getElementById('chainStatus');
+      if (validation.valid) {
+        statusEl.textContent = '✅ Chain Verified (SHA-256 Valid)';
+        statusEl.className = 'px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-950 text-emerald-400 border border-emerald-700';
+      } else {
+        statusEl.textContent = `❌ TAMPER DETECTED: ${validation.error}`;
+        statusEl.className = 'px-4 py-2 rounded-lg text-sm font-semibold bg-rose-950 text-rose-400 border border-rose-700';
+      }
+
+      const ledgerEl = document.getElementById('ledger');
+      ledgerEl.innerHTML = chain.slice().reverse().map(b => {
+        const d = b.data;
+        const isTicket = d.type === 'TICKET_MINT';
+        return `
+          <div class="p-4 rounded-lg bg-slate-950 border ${validation.valid ? 'border-slate-800' : 'border-rose-800/60'}">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400">Block #${b.index}</span>
+                <span class="text-xs text-slate-500 ml-2">${b.timestamp}</span>
+                ${isTicket ? `
+                  <h3 class="font-bold text-base mt-2">${d.event} — Seat <span class="text-emerald-400">${d.seat}</span></h3>
+                  <p class="text-sm text-slate-300">Owner: <b>${d.buyer}</b> • ₹${d.price} • ID: <code class="text-xs text-amber-400">${d.ticket_id}</code></p>
+                ` : `<p class="text-sm text-slate-400 mt-2">${d.message}</p>`}
+              </div>
+              ${isTicket && d.qr_base64 ? `<img src="data:image/png;base64,${d.qr_base64}" class="w-16 h-16 rounded border border-slate-700" />` : ''}
+            </div>
+            <div class="mt-3 pt-2 border-t border-slate-900 text-[11px] font-mono text-slate-500 space-y-0.5">
+              <div>Nonce: ${b.nonce}</div>
+              <div class="truncate">Hash: <span class="text-slate-300">${b.hash}</span></div>
+              <div class="truncate">Prev: ${b.previous_hash}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    document.getElementById('mintForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msgEl = document.getElementById('formMsg');
+      msgEl.textContent = 'Mining block...';
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buyer: document.getElementById('buyer').value,
+          event: document.getElementById('event').value,
+          seat: document.getElementById('seat').value,
+          price: parseFloat(document.getElementById('price').value)
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        msgEl.textContent = data.detail;
+      } else {
+        msgEl.textContent = '';
+        e.target.reset();
+        loadDashboard();
+      }
+    });
+
+    async function simulateTamper() {
+      const index = parseInt(document.getElementById('tamperIdx').value);
+      const new_buyer = document.getElementById('tamperBuyer').value;
+      if (!index || !new_buyer) return;
+      await fetch('/api/tamper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index, new_buyer })
+      });
+      loadDashboard();
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>
